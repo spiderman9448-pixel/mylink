@@ -7,11 +7,11 @@
     <style>
         /* --- 韓国風シンプル・カラー設定 --- */
         :root {
-            --bg-color: #fcfbf9;       /* 背景色：ほぼ白に近い生成り色 */
-            --text-color: #333333;     /* 文字色：真っ黒すぎない墨色 */
-            --accent-color: #e6dace;   /* ボタン色：落ち着いたミルクティーベージュ */
-            --btn-text-color: #333333; /* ボタン文字色：読みやすい濃いグレー */
-            --border-color: #333333;   /* 線の色：引き締めるための黒 */
+            --bg-color: #fcfbf9;       /* 背景色 */
+            --text-color: #333333;     /* 文字色 */
+            --accent-color: #e6dace;   /* ボタン色 */
+            --btn-text-color: #333333; /* ボタン文字色 */
+            --border-color: #333333;   /* 線の色 */
         }
 
         body {
@@ -23,37 +23,33 @@
             display: flex;
             justify-content: center;
             min-height: 100vh;
-            letter-spacing: 0.05em; /* 文字の間隔を少し広げて抜け感を出す */
+            letter-spacing: 0.05em;
         }
 
-        /* --- スマホ画面用コンテナ --- */
         .container {
             width: 100%;
             max-width: 480px;
             padding: 50px 20px;
             text-align: center;
             background-color: #fff;
-            /* 影をなくしてフラットに（よりシンプルに） */
             border-left: 1px solid #f0f0f0; 
             border-right: 1px solid #f0f0f0;
         }
 
-        /* --- プロフィール画像 --- */
         .profile-img {
             width: 120px;
             height: 120px;
             border-radius: 50%;
             object-fit: cover;
             margin-bottom: 20px;
-            border: 1px solid #ddd; /* 枠線を細くグレーに */
-            padding: 3px; /* 写真と枠の間に少し余白 */
+            border: 1px solid #ddd;
+            padding: 3px;
         }
 
-        /* --- 名前と自己紹介 --- */
         h1 {
             font-size: 1.4rem;
             margin-bottom: 15px;
-            font-weight: normal; /* 太字にしすぎないのが韓国風 */
+            font-weight: normal;
         }
 
         p {
@@ -63,7 +59,6 @@
             line-height: 1.8;
         }
 
-        /* --- リンクボタン --- */
         .link-list {
             display: flex;
             flex-direction: column;
@@ -76,12 +71,11 @@
             color: var(--btn-text-color);
             text-decoration: none;
             padding: 16px;
-            border-radius: 8px; /* 丸すぎない、少し角のあるデザイン */
+            border-radius: 8px;
             font-size: 0.95rem;
             transition: opacity 0.3s;
         }
 
-        /* 2つ目のボタンだけデザインを変える例（白背景に黒枠） */
         .link-btn.outline {
             background-color: transparent;
             border: 1px solid var(--border-color);
@@ -92,19 +86,17 @@
             opacity: 0.7;
         }
 
-        /* --- SNSアイコンエリア --- */
         .footer {
             margin-top: 50px;
             font-size: 0.75rem;
             color: #ccc;
         }
-
     </style>
 </head>
 <body>
 
     <div class="container">
-        <img src="https://placehold.co/150x150/e6dace/333333?text=Tomo" alt="プロフィール画像" class="profile-img">
+        <img src="profile.jpg" alt="プロフィール画像" class="profile-img">
 
         <h1>토모( •ө•)Tomo</h1>
         <p>
@@ -116,11 +108,11 @@
         <div class="link-list">
             <a href="https://www.instagram.com/daily_journey_note" class="link-btn" target="_blank">Instagram (@daily_journey_note)</a>
             
-            <a href="https://note.com/" class="link-btn outline" target="_blank">Note（韓国旅行・副業ノウハウ）</a>
+            <a href="https://note.com/" class="link-btn outline" target="_blank">Note（韓国旅行）</a>
             
             <a href="https://twitter.com/" class="link-btn" target="_blank">X (Twitter)</a>
             
-            <a href="#" class="link-btn" target="_blank">My Favorite Items (Rakuten Room)</a>
+            <a href="https://room.rakuten.co.jp/room_207206f8f0/items" class="link-btn" target="_blank">My Favorite Items (Rakuten Room)</a>
         </div>
 
         <div class="footer">
