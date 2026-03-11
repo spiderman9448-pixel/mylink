@@ -7,7 +7,8 @@
 # =============================================================
 
 CLIP_HELPER="$HOME/.local/bin/copy-image-to-clipboard.js"
-CLIP_APP="$HOME/Applications/ScreenshotClipboardCopy.app"
+CLIP_SCRIPT="$HOME/.local/bin/clipboard-screenshot.sh"
+CLIP_PLIST="$HOME/Library/LaunchAgents/com.user.screenshot-clipboard.plist"
 IMPORT_SCRIPT="$HOME/.local/bin/import-screenshot-to-photos.sh"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.user.screenshot-to-photos.plist"
 IMPORTED_LOG="$HOME/.local/share/screenshot-imports.log"
@@ -44,55 +45,77 @@ function run(argv) {
 JSEOF
     echo "     → $CLIP_HELPER"
 
-    # 3. Stay-open AppleScript アプリ（GUIコンテキストでクリップボードコピー）
-    echo "3/4 クリップボード自動コピーアプリを作成..."
-    mkdir -p "$(dirname "$CLIP_APP")"
+    # 3. launchd WatchPaths でクリップボード即時コピー
+    echo "3/4 クリップボード即時コピー（WatchPaths）を設定..."
+    mkdir -p "$(dirname "$CLIP_SCRIPT")"
 
-    # 既存アプリを終了
+    # 旧 AppleScript アプリがあれば終了・削除
     osascript -e 'tell application "ScreenshotClipboardCopy" to quit' 2>/dev/null
-    sleep 1
-
-    local tmp_as
-    tmp_as=$(mktemp /tmp/clip-app.XXXXXX.applescript)
-    cat > "$tmp_as" << ASEOF
-property lastModDate : 0
-
-on idle
-    set screenshotDir to "$screenshot_dir"
-    set helperPath to "$CLIP_HELPER"
-
-    try
-        set newestFile to do shell script "ls -t " & quoted form of screenshotDir & "/*.png " & quoted form of screenshotDir & "/*.jpg 2>/dev/null | head -1"
-        if newestFile is "" then return 1
-
-        set modDate to (do shell script "stat -f %m " & quoted form of newestFile) as number
-
-        if modDate > lastModDate then
-            set lastModDate to modDate
-            do shell script "/usr/bin/osascript -l JavaScript " & quoted form of helperPath & " " & quoted form of newestFile
-        end if
-    end try
-
-    return 1
-end idle
-ASEOF
-    osacompile -s -o "$CLIP_APP" "$tmp_as"
-    rm -f "$tmp_as"
-
-    # アプリを起動
-    open "$CLIP_APP"
-    echo "     → $CLIP_APP（起動済み）"
-
-    # ログイン時自動起動に追加
-    osascript -e "
-        tell application \"System Events\"
+    osascript -e '
+        tell application "System Events"
             try
-                delete login item \"ScreenshotClipboardCopy\"
+                delete login item "ScreenshotClipboardCopy"
             end try
-            make login item at end with properties {path:\"$CLIP_APP\", hidden:true}
         end tell
-    " 2>/dev/null
-    echo "     → ログイン時に自動起動するよう設定"
+    ' 2>/dev/null
+    rm -rf "$HOME/Applications/ScreenshotClipboardCopy.app"
+
+    # クリップボードコピースクリプト
+    cat > "$CLIP_SCRIPT" << 'CLIPEOF'
+#!/bin/bash
+# WatchPaths から呼ばれる。新しいスクショを即座にクリップボードにコピー。
+SCREENSHOT_DIR="__SCREENSHOT_DIR__"
+HELPER="__CLIP_HELPER__"
+STATE_FILE="/tmp/.screenshot-clipboard-last"
+
+# 最新ファイルを取得
+newest=$(ls -t "$SCREENSHOT_DIR"/*.png "$SCREENSHOT_DIR"/*.jpg 2>/dev/null | head -1)
+[ -z "$newest" ] && exit 0
+
+# 前回コピー済みなら何もしない
+last=$(cat "$STATE_FILE" 2>/dev/null)
+[ "$newest" = "$last" ] && exit 0
+
+# ファイルが書き込み中の場合に備えて少し待つ（スクショ保存完了まで）
+sleep 0.3
+
+# クリップボードにコピー
+/usr/bin/osascript -l JavaScript "$HELPER" "$newest"
+echo "$newest" > "$STATE_FILE"
+CLIPEOF
+    # プレースホルダーを置換
+    sed -i '' "s|__SCREENSHOT_DIR__|$screenshot_dir|g" "$CLIP_SCRIPT"
+    sed -i '' "s|__CLIP_HELPER__|$CLIP_HELPER|g" "$CLIP_SCRIPT"
+    chmod +x "$CLIP_SCRIPT"
+
+    # launchd plist（WatchPaths で即時検知）
+    launchctl unload "$CLIP_PLIST" 2>/dev/null
+    cat > "$CLIP_PLIST" << CLIPPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.screenshot-clipboard</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$CLIP_SCRIPT</string>
+    </array>
+    <key>WatchPaths</key>
+    <array>
+        <string>$screenshot_dir</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/tmp/screenshot-clipboard.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/screenshot-clipboard.err</string>
+</dict>
+</plist>
+CLIPPLIST
+    launchctl load "$CLIP_PLIST"
+    echo "     → WatchPaths で $screenshot_dir を監視中（即時検知）"
 
     # 4. launchd（写真アプリインポート用）
     echo "4/4 写真アプリインポート用 launchd を登録..."
@@ -155,16 +178,16 @@ PLIST
     echo "=== セットアップ完了 ==="
     echo "⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
     echo "  1. $screenshot_dir に保存"
-    echo "  2. 1秒以内にクリップボードに自動コピー（⌘V で貼り付け可能）"
+    echo "  2. 即座にクリップボードに自動コピー（⌘V で貼り付け可能）"
     echo "  3. 3秒以内に写真アプリにインポート → iPhoneに同期"
     echo ""
-    echo "※ ScreenshotClipboardCopy.app がDockに表示されます"
-    echo "※ ログイン時に自動起動します"
+    echo "※ launchd で自動監視（ログイン時に自動起動）"
 }
 
 unsetup() {
     echo "=== セットアップ解除 ==="
 
+    # 旧 AppleScript アプリの掃除
     osascript -e 'tell application "ScreenshotClipboardCopy" to quit' 2>/dev/null
     osascript -e '
         tell application "System Events"
@@ -173,18 +196,24 @@ unsetup() {
             end try
         end tell
     ' 2>/dev/null
-    rm -rf "$CLIP_APP"
-    echo "  クリップボードコピーアプリを削除しました"
+    rm -rf "$HOME/Applications/ScreenshotClipboardCopy.app"
 
+    # クリップボード WatchPaths エージェント
+    launchctl unload "$CLIP_PLIST" 2>/dev/null
+    rm -f "$CLIP_PLIST" "$CLIP_SCRIPT"
+    echo "  クリップボードコピーを削除しました"
+
+    # 写真インポート エージェント
     launchctl unload "$LAUNCHD_PLIST" 2>/dev/null
     rm -f "$LAUNCHD_PLIST" "$IMPORT_SCRIPT" "$CLIP_HELPER"
-    echo "  launchd エージェントとスクリプトを削除しました"
+    echo "  写真インポートを削除しました"
 
     # Folder Action の残りも掃除
     osascript -e 'tell application "System Events" to try
         delete folder action "Screenshot Clipboard Copy"
     end try' 2>/dev/null
     rm -f "$HOME/Library/Scripts/Folder Action Scripts/Screenshot Clipboard Copy.scpt"
+    rm -f /tmp/.screenshot-clipboard-last
 
     echo ""
     echo "=== 解除完了 ==="
@@ -197,8 +226,8 @@ status() {
     current_location=$(defaults read com.apple.screencapture location 2>/dev/null || echo "(デフォルト: デスクトップ)")
     echo "スクショ保存先: $current_location"
 
-    if pgrep -f "ScreenshotClipboardCopy" > /dev/null 2>&1; then
-        echo "クリップボードコピー: 実行中"
+    if launchctl list 2>/dev/null | grep -q "com.user.screenshot-clipboard"; then
+        echo "クリップボードコピー: 実行中（WatchPaths即時検知）"
     else
         echo "クリップボードコピー: 停止中"
     fi
