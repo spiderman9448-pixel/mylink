@@ -52,7 +52,15 @@ for file in "\$SCREENSHOT_DIR"/スクリーンショット*.png "\$SCREENSHOT_DI
 
     echo "\$(date): Found new screenshot: \$file"
 
-    # 写真アプリにインポート（バックグラウンドで）
+    # クリップボードにコピー（⌘V で貼り付け可能に）
+    osascript -e "set the clipboard to (read (POSIX file \"\$file\") as «class PNGf»)" 2>&1
+    if [ \$? -eq 0 ]; then
+        echo "\$(date): Copied to clipboard: \$file"
+    else
+        echo "\$(date): Clipboard copy failed: \$file"
+    fi
+
+    # 写真アプリにインポート
     osascript -e "
         tell application \"Photos\"
             import POSIX file \"\$file\"
@@ -112,9 +120,10 @@ PLIST
     echo "⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
     echo "  1. 通常通り $screenshot_dir に保存"
     echo "  2. 5秒以内に自動検知"
-    echo "  3. 写真アプリにインポート → iPhoneに同期"
+    echo "  3. クリップボードに自動コピー（⌘V で貼り付け可能）"
+    echo "  4. 写真アプリにインポート → iPhoneに同期"
     echo ""
-    echo "※ スクショ保存先やクリップボードコピーは一切変更しません"
+    echo "※ スクショ保存先は変更しません"
     echo "※ iCloud写真がオンになっていることを確認してください"
     echo ""
     echo "ログ: cat /tmp/screenshot-to-photos.log"
