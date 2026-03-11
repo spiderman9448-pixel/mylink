@@ -55,11 +55,14 @@ JSEOF
     local tmp_as
     tmp_as=$(mktemp /tmp/clip-app.XXXXXX.applescript)
     cat > "$tmp_as" << ASEOF
+use framework "AppKit"
+use framework "Foundation"
+use scripting additions
+
 property lastModDate : 0
 
 on idle
     set screenshotDir to "$screenshot_dir"
-    set helperPath to "$CLIP_HELPER"
 
     try
         set newestFile to do shell script "ls -t " & quoted form of screenshotDir & "/*.png " & quoted form of screenshotDir & "/*.jpg 2>/dev/null | head -1"
@@ -69,7 +72,12 @@ on idle
 
         if modDate > lastModDate then
             set lastModDate to modDate
-            do shell script "/usr/bin/osascript -l JavaScript " & quoted form of helperPath & " " & quoted form of newestFile
+            set nsImage to current application's NSImage's alloc()'s initWithContentsOfFile:newestFile
+            if nsImage is not missing value then
+                set pb to current application's NSPasteboard's generalPasteboard()
+                pb's clearContents()
+                pb's writeObjects:{nsImage}
+            end if
         end if
     end try
 
