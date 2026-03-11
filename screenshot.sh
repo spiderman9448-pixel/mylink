@@ -63,7 +63,7 @@ on idle
 
     try
         set newestFile to do shell script "ls -t " & quoted form of screenshotDir & "/*.png " & quoted form of screenshotDir & "/*.jpg 2>/dev/null | head -1"
-        if newestFile is "" then return 3
+        if newestFile is "" then return 1
 
         set modDate to (do shell script "stat -f %m " & quoted form of newestFile) as number
 
@@ -73,7 +73,7 @@ on idle
         end if
     end try
 
-    return 3
+    return 1
 end idle
 ASEOF
     osacompile -s -o "$CLIP_APP" "$tmp_as"
@@ -155,7 +155,7 @@ PLIST
     echo "=== セットアップ完了 ==="
     echo "⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
     echo "  1. $screenshot_dir に保存"
-    echo "  2. 3秒以内にクリップボードに自動コピー（⌘V で貼り付け可能）"
+    echo "  2. 1秒以内にクリップボードに自動コピー（⌘V で貼り付け可能）"
     echo "  3. 5秒以内に写真アプリにインポート → iPhoneに同期"
     echo ""
     echo "※ ScreenshotClipboardCopy.app がDockに表示されます"
