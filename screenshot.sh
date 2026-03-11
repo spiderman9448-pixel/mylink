@@ -1,114 +1,156 @@
 #!/bin/bash
 # =============================================================
-# Mac スクリーンショット自動化スクリプト
+# Mac スクリーンショット → iPhone 写真 自動同期セットアップ
 # =============================================================
-# 使い方:
-#   ./screenshot.sh              → 全画面スクショ＋クリップボードにコピー
-#   ./screenshot.sh area         → 範囲選択スクショ＋クリップボードにコピー
-#   ./screenshot.sh window       → ウィンドウ選択スクショ＋クリップボードにコピー
-#   ./screenshot.sh loop 5       → 5秒間隔で全画面スクショを繰り返し撮影
-#   ./screenshot.sh loop 5 area  → 5秒間隔で範囲選択スクショを繰り返し撮影
+# このスクリプトを一度実行するだけで、以降は普段通り ⌘⇧3 / ⌘⇧4 / ⌘⇧5 で
+# スクショを撮るだけで自動的にiPhoneの写真に同期されます。
 #
-# オプション:
-#   SAVE_DIR 環境変数でスクショの保存先を変更可能
-#     例: SAVE_DIR=~/Pictures ./screenshot.sh
+# 仕組み:
+#   1. macOSのスクショ保存先をiCloud Drive内に変更
+#   2. そのフォルダにフォルダアクションを設定
+#   3. 新しい画像が保存されるたびに写真アプリに自動インポート
 #
-# iCloud連携:
-#   デフォルトでiCloud Drive内に保存 + 写真アプリにインポートされます
-#   iCloud Photosが有効なら、iPhoneの写真にも自動同期されます
+# セットアップ:
+#   chmod +x screenshot.sh
+#   ./screenshot.sh setup
+#
+# セットアップ解除:
+#   ./screenshot.sh unsetup
 # =============================================================
 
-# 保存先ディレクトリ（デフォルト: iCloud Driveのスクリーンショットフォルダ）
 ICLOUD_SCREENSHOTS="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Screenshots"
-SAVE_DIR="${SAVE_DIR:-$ICLOUD_SCREENSHOTS}"
-mkdir -p "$SAVE_DIR"
+FOLDER_ACTION_SCRIPT="$HOME/Library/Scripts/Folder Action Scripts/ImportToPhotos.scpt"
 
-# タイムスタンプ付きファイル名を生成
-generate_filename() {
-    local timestamp
-    timestamp=$(date +"%Y%m%d_%H%M%S")
-    echo "${SAVE_DIR}/screenshot_${timestamp}.png"
-}
+setup() {
+    echo "=== スクリーンショット → iPhone 写真 自動同期セットアップ ==="
+    echo ""
 
-# スクリーンショットを撮影してクリップボードにコピー
-take_screenshot() {
-    local mode="$1"
-    local filepath
-    filepath=$(generate_filename)
+    # 1. iCloud Drive内にスクショフォルダを作成
+    echo "1/3 iCloud Drive内にスクショフォルダを作成..."
+    mkdir -p "$ICLOUD_SCREENSHOTS"
+    echo "     → $ICLOUD_SCREENSHOTS"
 
-    case "$mode" in
-        area)
-            echo "範囲を選択してください..."
-            screencapture -i "$filepath"
-            ;;
-        window)
-            echo "ウィンドウをクリックしてください..."
-            screencapture -iW "$filepath"
-            ;;
-        *)
-            # 全画面
-            screencapture "$filepath"
-            ;;
-    esac
+    # 2. macOSのスクショ保存先を変更
+    echo "2/3 macOSのスクショ保存先を変更..."
+    defaults write com.apple.screencapture location "$ICLOUD_SCREENSHOTS"
+    killall SystemUIServer 2>/dev/null
+    echo "     → スクショ保存先をiCloud Driveに変更しました"
 
-    # screencapture がキャンセルされた場合（ファイルが作成されない）
-    if [ ! -f "$filepath" ]; then
-        echo "スクリーンショットがキャンセルされました"
+    # 3. フォルダアクション用AppleScriptを作成＆設定
+    echo "3/3 フォルダアクション（写真アプリ自動インポート）を設定..."
+    mkdir -p "$(dirname "$FOLDER_ACTION_SCRIPT")"
+
+    # AppleScriptをコンパイルして保存
+    osacompile -o "$FOLDER_ACTION_SCRIPT" <<'APPLESCRIPT'
+on adding folder items to theFolder after receiving theFiles
+    tell application "Photos"
+        activate
+        delay 1
+        repeat with aFile in theFiles
+            set fileName to name of (info for aFile)
+            if fileName ends with ".png" or fileName ends with ".jpg" or fileName ends with ".jpeg" then
+                try
+                    import {aFile}
+                end try
+            end if
+        end repeat
+    end tell
+end adding folder items to
+APPLESCRIPT
+
+    if [ $? -ne 0 ]; then
+        echo "     ⚠ AppleScriptのコンパイルに失敗しました"
         return 1
     fi
 
-    # クリップボードにコピー
-    osascript -e "set the clipboard to (read (POSIX file \"$filepath\") as «class PNGf»)"
-
-    # 写真アプリにインポート（iCloud Photos経由でiPhoneにも同期される）
-    local import_result
-    import_result=$(osascript <<APPLESCRIPT 2>&1
-        tell application "Photos"
-            activate
-            delay 2
-            set theFile to POSIX file "$filepath"
-            import {theFile}
+    # フォルダアクションをフォルダに紐付け
+    osascript <<ATTACH
+        tell application "System Events"
+            set folder actions enabled to true
+            try
+                set fa to make new folder action with properties {name:"Screenshots Auto Import", path:"$ICLOUD_SCREENSHOTS"}
+            on error
+                set fa to folder action "Screenshots Auto Import"
+            end try
+            try
+                make new script of fa with properties {name:"ImportToPhotos.scpt", POSIX path:"$FOLDER_ACTION_SCRIPT"}
+            end try
         end tell
-APPLESCRIPT
-    )
+ATTACH
+
     if [ $? -eq 0 ]; then
-        echo "✔ 写真アプリにインポートしました（iPhoneに同期されます）"
+        echo "     → フォルダアクションを設定しました"
     else
-        echo "⚠ 写真アプリへのインポートに失敗: $import_result"
+        echo "     ⚠ フォルダアクションの設定に失敗しました"
+        echo "     → 手動設定: Finderで右クリック → サービス → フォルダアクション設定"
+        return 1
     fi
 
-    echo "✔ 保存: $filepath"
-    echo "✔ クリップボードにコピーしました"
-    return 0
+    echo ""
+    echo "=== セットアップ完了 ==="
+    echo "これで普段通り ⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
+    echo "  1. iCloud Drive/Screenshots に保存"
+    echo "  2. 写真アプリに自動インポート"
+    echo "  3. iCloud Photos経由でiPhoneに同期"
+    echo ""
+    echo "※ iCloud写真がオンになっていることを確認してください"
+    echo "  (設定 → Apple ID → iCloud → 写真)"
+}
+
+unsetup() {
+    echo "=== セットアップ解除 ==="
+
+    # スクショ保存先をデフォルト(デスクトップ)に戻す
+    defaults write com.apple.screencapture location "$HOME/Desktop"
+    killall SystemUIServer 2>/dev/null
+    echo "✔ スクショ保存先をデスクトップに戻しました"
+
+    # フォルダアクションを削除
+    osascript <<'DETACH'
+        tell application "System Events"
+            try
+                delete folder action "Screenshots Auto Import"
+            end try
+        end tell
+DETACH
+    echo "✔ フォルダアクションを削除しました"
+
+    # スクリプトファイルを削除
+    rm -f "$FOLDER_ACTION_SCRIPT"
+    echo "✔ AppleScriptを削除しました"
+
+    echo ""
+    echo "=== 解除完了 ==="
+}
+
+status() {
+    echo "=== 現在の設定状況 ==="
+    local current_location
+    current_location=$(defaults read com.apple.screencapture location 2>/dev/null || echo "(デフォルト: デスクトップ)")
+    echo "スクショ保存先: $current_location"
+
+    if [ -f "$FOLDER_ACTION_SCRIPT" ]; then
+        echo "フォルダアクション: ✔ 設定済み"
+    else
+        echo "フォルダアクション: ✗ 未設定"
+    fi
 }
 
 # メイン処理
-main() {
-    local command="${1:-full}"
-
-    case "$command" in
-        area)
-            take_screenshot "area"
-            ;;
-        window)
-            take_screenshot "window"
-            ;;
-        loop)
-            local interval="${2:-10}"
-            local mode="${3:-full}"
-            echo "=== 定期スクリーンショット開始 ==="
-            echo "間隔: ${interval}秒 | モード: ${mode}"
-            echo "停止するには Ctrl+C を押してください"
-            echo ""
-            while true; do
-                take_screenshot "$mode"
-                sleep "$interval"
-            done
-            ;;
-        full|*)
-            take_screenshot "full"
-            ;;
-    esac
-}
-
-main "$@"
+case "${1:-status}" in
+    setup)
+        setup
+        ;;
+    unsetup)
+        unsetup
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo "使い方:"
+        echo "  ./screenshot.sh setup    → セットアップ（初回のみ）"
+        echo "  ./screenshot.sh unsetup  → セットアップ解除"
+        echo "  ./screenshot.sh status   → 現在の設定確認"
+        ;;
+esac

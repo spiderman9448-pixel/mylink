@@ -1,68 +1,33 @@
-# Mac Automator / ショートカット設定ガイド
+# スクリーンショット → iPhone 写真 自動同期
 
-## 方法1: シェルスクリプトを直接使う
+## セットアップ（初回のみ）
 
 ```bash
-# 実行権限を付与
 chmod +x screenshot.sh
-
-# 全画面スクリーンショット
-./screenshot.sh
-
-# 範囲選択
-./screenshot.sh area
-
-# ウィンドウ選択
-./screenshot.sh window
-
-# 10秒間隔で繰り返し撮影
-./screenshot.sh loop 10
+./screenshot.sh setup
 ```
 
-## 方法2: macOS ショートカットApp で自動化
+これだけで完了です。以降は普段通り **⌘⇧3** / **⌘⇧4** / **⌘⇧5** でスクショを撮ると、自動的にiPhoneの写真に同期されます。
 
-1. **ショートカット.app** を開く
-2. 新規ショートカットを作成
-3. 「シェルスクリプトを実行」アクションを追加
-4. スクリプト欄に以下を入力:
+## 仕組み
+
+1. macOSのスクショ保存先を `iCloud Drive/Screenshots` に変更
+2. フォルダアクションで新しい画像を検知
+3. 写真アプリに自動インポート
+4. iCloud Photos経由でiPhoneに同期
+
+## その他のコマンド
 
 ```bash
-/path/to/screenshot.sh
+# 現在の設定を確認
+./screenshot.sh status
+
+# セットアップ解除（デスクトップ保存に戻す）
+./screenshot.sh unsetup
 ```
 
-5. キーボードショートカットを割り当て（例: ⌘⇧5 の代替）
+## 前提条件
 
-## 方法3: launchd で定期実行
-
-`~/Library/LaunchAgents/com.user.screenshot.plist` を作成:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.user.screenshot</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>/path/to/screenshot.sh</string>
-    </array>
-    <key>StartInterval</key>
-    <integer>300</integer>
-    <key>RunAtLoad</key>
-    <false/>
-</dict>
-</plist>
-```
-
-有効化:
-```bash
-launchctl load ~/Library/LaunchAgents/com.user.screenshot.plist
-```
-
-停止:
-```bash
-launchctl unload ~/Library/LaunchAgents/com.user.screenshot.plist
-```
+- macOS上で実行
+- iCloud Photosが有効（設定 → Apple ID → iCloud → 写真）
+- 初回セットアップ時にアクセス許可のダイアログが出たら「許可」を選択
