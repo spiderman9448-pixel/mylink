@@ -2,13 +2,8 @@
 # =============================================================
 # Mac スクリーンショット → iPhone 写真 自動同期セットアップ
 # =============================================================
-# このスクリプトを一度実行するだけで、以降は普段通り ⌘⇧3 / ⌘⇧4 / ⌘⇧5 で
-# スクショを撮るだけで自動的にiPhoneの写真に同期されます。
-#
-# 仕組み:
-#   1. macOSのスクショ保存先をiCloud Drive内に変更
-#   2. launchd (WatchPaths) でフォルダを監視
-#   3. 新しい画像が保存されると写真アプリに自動インポート
+# スクショの保存先は変更しません（既存の設定をそのまま使用）
+# デスクトップ上の新しいスクショを検知して写真アプリにインポートします
 #
 # セットアップ:
 #   chmod +x screenshot.sh
@@ -18,7 +13,6 @@
 #   ./screenshot.sh unsetup
 # =============================================================
 
-ICLOUD_SCREENSHOTS="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Screenshots"
 IMPORT_SCRIPT="$HOME/.local/bin/import-screenshot-to-photos.sh"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.user.screenshot-to-photos.plist"
 IMPORTED_LOG="$HOME/.local/share/screenshot-imports.log"
@@ -27,76 +21,57 @@ setup() {
     echo "=== スクリーンショット → iPhone 写真 自動同期セットアップ ==="
     echo ""
 
-    # 1. iCloud Drive内にスクショフォルダを作成
-    echo "1/4 iCloud Drive内にスクショフォルダを作成..."
-    mkdir -p "$ICLOUD_SCREENSHOTS"
-    echo "     → $ICLOUD_SCREENSHOTS"
+    # スクショ保存先を取得
+    local screenshot_dir
+    screenshot_dir=$(defaults read com.apple.screencapture location 2>/dev/null || echo "$HOME/Desktop")
+    # チルダを展開
+    screenshot_dir="${screenshot_dir/#\~/$HOME}"
 
-    # 2. macOSのスクショ保存先を変更
-    echo "2/4 macOSのスクショ保存先を変更..."
-    defaults write com.apple.screencapture location "$ICLOUD_SCREENSHOTS"
-    killall SystemUIServer 2>/dev/null
-    echo "     → スクショ保存先をiCloud Driveに変更しました"
+    echo "1/3 スクショ保存先を確認..."
+    echo "     → $screenshot_dir"
+    mkdir -p "$screenshot_dir"
 
-    # 3. インポートスクリプトを作成
-    echo "3/4 インポートスクリプトを作成..."
+    # 2. インポートスクリプトを作成
+    echo "2/3 インポートスクリプトを作成..."
     mkdir -p "$(dirname "$IMPORT_SCRIPT")"
     mkdir -p "$(dirname "$IMPORTED_LOG")"
     touch "$IMPORTED_LOG"
 
-    cat > "$IMPORT_SCRIPT" << 'SCRIPT'
+    cat > "$IMPORT_SCRIPT" << SCRIPT
 #!/bin/bash
-# スクショフォルダ内の新しい画像をクリップボードにコピー＆写真アプリにインポート
-SCREENSHOT_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Screenshots"
-LOG_FILE="$HOME/.local/share/screenshot-imports.log"
+# デスクトップの新しいスクショを写真アプリにインポート
+SCREENSHOT_DIR="$screenshot_dir"
+LOG_FILE="$IMPORTED_LOG"
 
-sleep 3
+for file in "\$SCREENSHOT_DIR"/スクリーンショット*.png "\$SCREENSHOT_DIR"/Screenshot*.png "\$SCREENSHOT_DIR"/スクリーンショット*.jpg "\$SCREENSHOT_DIR"/Screenshot*.jpg; do
+    [ -f "\$file" ] || continue
 
-newest=""
-newest_time=0
-
-for file in "$SCREENSHOT_DIR"/*.png "$SCREENSHOT_DIR"/*.jpg "$SCREENSHOT_DIR"/*.jpeg; do
-    [ -f "$file" ] || continue
-
-    if grep -qxF "$file" "$LOG_FILE" 2>/dev/null; then
+    if grep -qxF "\$file" "\$LOG_FILE" 2>/dev/null; then
         continue
     fi
 
-    # 最新ファイルを特定
-    file_time=$(stat -f %m "$file" 2>/dev/null || echo 0)
-    if [ "$file_time" -gt "$newest_time" ]; then
-        newest="$file"
-        newest_time="$file_time"
-    fi
+    echo "\$(date): Found new screenshot: \$file"
 
-    # 写真アプリにインポート
+    # 写真アプリにインポート（バックグラウンドで）
     osascript -e "
         tell application \"Photos\"
-            activate
-            delay 1
-            import POSIX file \"$file\"
+            import POSIX file \"\$file\"
         end tell
     " 2>&1
 
-    if [ $? -eq 0 ]; then
-        echo "$file" >> "$LOG_FILE"
-        echo "$(date): Imported $file"
+    if [ \$? -eq 0 ]; then
+        echo "\$file" >> "\$LOG_FILE"
+        echo "\$(date): Imported \$file"
     else
-        echo "$(date): FAILED to import $file"
+        echo "\$(date): FAILED to import \$file"
     fi
 done
-
-# 最新のスクショをクリップボードにコピー
-if [ -n "$newest" ]; then
-    osascript -e "set the clipboard to (read (POSIX file \"$newest\") as «class PNGf»)" 2>&1
-    echo "$(date): Copied to clipboard: $newest"
-fi
 SCRIPT
     chmod +x "$IMPORT_SCRIPT"
     echo "     → $IMPORT_SCRIPT"
 
-    # 4. launchd エージェントを作成・登録
-    echo "4/4 launchd エージェント（フォルダ監視）を登録..."
+    # 3. launchd エージェントを作成・登録
+    echo "3/3 launchd エージェント（5秒ポーリング）を登録..."
 
     # 既存のエージェントがあればアンロード
     launchctl unload "$LAUNCHD_PLIST" 2>/dev/null
@@ -134,34 +109,26 @@ PLIST
 
     echo ""
     echo "=== セットアップ完了 ==="
-    echo "これで普段通り ⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
-    echo "  1. iCloud Drive/Screenshots に保存"
-    echo "  2. 5秒ごとに新しいスクショを自動検知"
-    echo "  3. クリップボードにコピー＋写真アプリにインポート → iPhoneに同期"
+    echo "⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
+    echo "  1. 通常通り $screenshot_dir に保存"
+    echo "  2. 5秒以内に自動検知"
+    echo "  3. 写真アプリにインポート → iPhoneに同期"
     echo ""
+    echo "※ スクショ保存先やクリップボードコピーは一切変更しません"
     echo "※ iCloud写真がオンになっていることを確認してください"
-    echo "  (設定 → Apple ID → iCloud → 写真)"
     echo ""
-    echo "テスト: スクショを撮って数秒待ち、写真アプリを確認してください"
     echo "ログ: cat /tmp/screenshot-to-photos.log"
 }
 
 unsetup() {
     echo "=== セットアップ解除 ==="
 
-    # launchd エージェントをアンロード・削除
     launchctl unload "$LAUNCHD_PLIST" 2>/dev/null
     rm -f "$LAUNCHD_PLIST"
-    echo "✔ launchd エージェントを削除しました"
+    echo "  launchd エージェントを削除しました"
 
-    # スクショ保存先をデフォルト(デスクトップ)に戻す
-    defaults write com.apple.screencapture location "$HOME/Desktop"
-    killall SystemUIServer 2>/dev/null
-    echo "✔ スクショ保存先をデスクトップに戻しました"
-
-    # インポートスクリプトを削除
     rm -f "$IMPORT_SCRIPT"
-    echo "✔ インポートスクリプトを削除しました"
+    echo "  インポートスクリプトを削除しました"
 
     echo ""
     echo "=== 解除完了 ==="
@@ -175,9 +142,9 @@ status() {
     echo "スクショ保存先: $current_location"
 
     if launchctl list | grep -q "com.user.screenshot-to-photos"; then
-        echo "launchd監視: ✔ 実行中"
+        echo "launchd監視: 実行中"
     else
-        echo "launchd監視: ✗ 停止中"
+        echo "launchd監視: 停止中"
     fi
 
     if [ -f "$IMPORTED_LOG" ]; then
@@ -186,32 +153,25 @@ status() {
         echo "インポート済み: ${count}枚"
     fi
 
-    if [ -f /tmp/screenshot-to-photos.err ]; then
-        local errors
-        errors=$(cat /tmp/screenshot-to-photos.err)
-        if [ -n "$errors" ]; then
-            echo ""
-            echo "--- エラーログ ---"
-            tail -5 /tmp/screenshot-to-photos.err
-        fi
+    echo ""
+    echo "--- 最新ログ ---"
+    tail -5 /tmp/screenshot-to-photos.log 2>/dev/null || echo "(ログなし)"
+    local errors
+    errors=$(cat /tmp/screenshot-to-photos.err 2>/dev/null)
+    if [ -n "$errors" ]; then
+        echo "--- エラー ---"
+        tail -5 /tmp/screenshot-to-photos.err
     fi
 }
 
-# メイン処理
 case "${1:-status}" in
-    setup)
-        setup
-        ;;
-    unsetup)
-        unsetup
-        ;;
-    status)
-        status
-        ;;
+    setup)   setup ;;
+    unsetup) unsetup ;;
+    status)  status ;;
     *)
         echo "使い方:"
-        echo "  ./screenshot.sh setup    → セットアップ（初回のみ）"
-        echo "  ./screenshot.sh unsetup  → セットアップ解除"
-        echo "  ./screenshot.sh status   → 現在の設定確認"
+        echo "  ./screenshot.sh setup    → セットアップ"
+        echo "  ./screenshot.sh unsetup  → 解除"
+        echo "  ./screenshot.sh status   → 状態確認"
         ;;
 esac
