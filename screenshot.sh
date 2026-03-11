@@ -1,38 +1,31 @@
 #!/bin/bash
 # =============================================================
-# Mac スクリーンショット → iPhone 写真 自動同期セットアップ
+# Mac スクリーンショット → クリップボード自動コピー & iPhone同期
 # =============================================================
-# スクショの保存先は変更しません（既存の設定をそのまま使用）
-#
-# セットアップ:
-#   chmod +x screenshot.sh
-#   ./screenshot.sh setup
-#
-# セットアップ解除:
-#   ./screenshot.sh unsetup
+# セットアップ:  chmod +x screenshot.sh && ./screenshot.sh setup
+# セットアップ解除:  ./screenshot.sh unsetup
 # =============================================================
 
 CLIP_HELPER="$HOME/.local/bin/copy-image-to-clipboard.js"
-FOLDER_ACTION_SCRIPT="$HOME/Library/Scripts/Folder Action Scripts/Screenshot Clipboard Copy.scpt"
+CLIP_APP="$HOME/Applications/ScreenshotClipboardCopy.app"
 IMPORT_SCRIPT="$HOME/.local/bin/import-screenshot-to-photos.sh"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.user.screenshot-to-photos.plist"
 IMPORTED_LOG="$HOME/.local/share/screenshot-imports.log"
 
 setup() {
-    echo "=== スクリーンショット → iPhone 写真 自動同期セットアップ ==="
+    echo "=== スクリーンショット自動コピー & iPhone同期 セットアップ ==="
     echo ""
 
-    # スクショ保存先を取得
     local screenshot_dir
     screenshot_dir=$(defaults read com.apple.screencapture location 2>/dev/null || echo "$HOME/Desktop")
     screenshot_dir="${screenshot_dir/#\~/$HOME}"
 
-    echo "1/5 スクショ保存先を確認..."
+    echo "1/4 スクショ保存先を確認..."
     echo "     → $screenshot_dir"
     mkdir -p "$screenshot_dir"
 
-    # 2. クリップボードヘルパー（JXA）を作成
-    echo "2/5 クリップボードヘルパーを作成..."
+    # 2. JXA クリップボードヘルパー
+    echo "2/4 クリップボードヘルパーを作成..."
     mkdir -p "$(dirname "$CLIP_HELPER")"
     cat > "$CLIP_HELPER" << 'JSEOF'
 ObjC.import('AppKit');
@@ -51,53 +44,58 @@ function run(argv) {
 JSEOF
     echo "     → $CLIP_HELPER"
 
-    # 3. Folder Action を作成（GUIコンテキストでクリップボードコピー）
-    echo "3/5 Folder Action を作成（クリップボード自動コピー）..."
-    mkdir -p "$(dirname "$FOLDER_ACTION_SCRIPT")"
+    # 3. Stay-open AppleScript アプリ（GUIコンテキストでクリップボードコピー）
+    echo "3/4 クリップボード自動コピーアプリを作成..."
+    mkdir -p "$(dirname "$CLIP_APP")"
 
-    # AppleScript を一時ファイルに書いてコンパイル
+    # 既存アプリを終了
+    osascript -e 'tell application "ScreenshotClipboardCopy" to quit' 2>/dev/null
+    sleep 1
+
     local tmp_as
-    tmp_as=$(mktemp /tmp/folder-action.XXXXXX.applescript)
+    tmp_as=$(mktemp /tmp/clip-app.XXXXXX.applescript)
     cat > "$tmp_as" << ASEOF
-on adding folder items to this_folder after receiving added_items
+property lastModDate : 0
+
+on idle
+    set screenshotDir to "$screenshot_dir"
     set helperPath to "$CLIP_HELPER"
-    repeat with added_item in added_items
-        set posixPath to POSIX path of added_item
-        try
-            do shell script "/usr/bin/osascript -l JavaScript " & quoted form of helperPath & " " & quoted form of posixPath
-        end try
-    end repeat
-end adding folder items to
-ASEOF
-    osacompile -o "$FOLDER_ACTION_SCRIPT" "$tmp_as"
-    rm -f "$tmp_as"
-    echo "     → $FOLDER_ACTION_SCRIPT"
 
-    # Folder Action をスクショフォルダに紐付け
-    osascript << ATTACHEOF
-tell application "System Events"
-    set folder actions enabled to true
-
-    -- 既存の同名アクションがあれば削除
     try
-        delete folder action "Screenshot Clipboard Copy"
+        set newestFile to do shell script "ls -t " & quoted form of screenshotDir & "/*.png " & quoted form of screenshotDir & "/*.jpg 2>/dev/null | head -1"
+        if newestFile is "" then return 3
+
+        set modDate to (do shell script "stat -f %m " & quoted form of newestFile) as number
+
+        if modDate > lastModDate then
+            set lastModDate to modDate
+            do shell script "/usr/bin/osascript -l JavaScript " & quoted form of helperPath & " " & quoted form of newestFile
+        end if
     end try
 
-    -- 新規作成して紐付け
-    set newAction to make new folder action with properties {name:"Screenshot Clipboard Copy", path:"$screenshot_dir"}
-    set scriptFile to POSIX file "$FOLDER_ACTION_SCRIPT" as alias
-    make new script at end of scripts of newAction with properties {name:"Screenshot Clipboard Copy", path:scriptFile}
-end tell
-ATTACHEOF
+    return 3
+end idle
+ASEOF
+    osacompile -s -o "$CLIP_APP" "$tmp_as"
+    rm -f "$tmp_as"
 
-    if [ $? -eq 0 ]; then
-        echo "     → Folder Action をスクショフォルダに登録しました"
-    else
-        echo "     ⚠ Folder Action の登録に失敗（手動設定が必要かもしれません）"
-    fi
+    # アプリを起動
+    open "$CLIP_APP"
+    echo "     → $CLIP_APP（起動済み）"
 
-    # 4. インポートスクリプトを作成（Photos取り込みのみ、クリップボードはFolder Actionが担当）
-    echo "4/5 インポートスクリプトを作成（写真アプリ用）..."
+    # ログイン時自動起動に追加
+    osascript -e "
+        tell application \"System Events\"
+            try
+                delete login item \"ScreenshotClipboardCopy\"
+            end try
+            make login item at end with properties {path:\"$CLIP_APP\", hidden:true}
+        end tell
+    " 2>/dev/null
+    echo "     → ログイン時に自動起動するよう設定"
+
+    # 4. launchd（写真アプリインポート用）
+    echo "4/4 写真アプリインポート用 launchd を登録..."
     mkdir -p "$(dirname "$IMPORT_SCRIPT")"
     mkdir -p "$(dirname "$IMPORTED_LOG")"
     touch "$IMPORTED_LOG"
@@ -109,20 +107,15 @@ LOG_FILE="$IMPORTED_LOG"
 
 for file in "\$SCREENSHOT_DIR"/*.png "\$SCREENSHOT_DIR"/*.jpg "\$SCREENSHOT_DIR"/*.jpeg; do
     [ -f "\$file" ] || continue
-
     if grep -qxF "\$file" "\$LOG_FILE" 2>/dev/null; then
         continue
     fi
-
     echo "\$(date): Found new screenshot: \$file"
-
-    # 写真アプリにインポート
     osascript -e "
         tell application \"Photos\"
             import POSIX file \"\$file\"
         end tell
     " 2>&1
-
     if [ \$? -eq 0 ]; then
         echo "\$file" >> "\$LOG_FILE"
         echo "\$(date): Imported \$file"
@@ -132,12 +125,8 @@ for file in "\$SCREENSHOT_DIR"/*.png "\$SCREENSHOT_DIR"/*.jpg "\$SCREENSHOT_DIR"
 done
 SCRIPT
     chmod +x "$IMPORT_SCRIPT"
-    echo "     → $IMPORT_SCRIPT"
 
-    # 5. launchd エージェント（写真アプリインポート用）
-    echo "5/5 launchd エージェント（5秒ポーリング）を登録..."
     launchctl unload "$LAUNCHD_PLIST" 2>/dev/null
-
     cat > "$LAUNCHD_PLIST" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -160,49 +149,42 @@ SCRIPT
 </dict>
 </plist>
 PLIST
-
     launchctl load "$LAUNCHD_PLIST"
-    if [ $? -eq 0 ]; then
-        echo "     → launchd エージェントを登録しました"
-    else
-        echo "     ⚠ launchd の登録に失敗しました"
-        return 1
-    fi
 
     echo ""
     echo "=== セットアップ完了 ==="
     echo "⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
-    echo "  1. 通常通り $screenshot_dir に保存"
-    echo "  2. Folder Action で即座にクリップボードにコピー（⌘V で貼り付け可能）"
+    echo "  1. $screenshot_dir に保存"
+    echo "  2. 3秒以内にクリップボードに自動コピー（⌘V で貼り付け可能）"
     echo "  3. 5秒以内に写真アプリにインポート → iPhoneに同期"
     echo ""
-    echo "※ スクショ保存先は変更しません"
-    echo "※ iCloud写真がオンになっていることを確認してください"
-    echo ""
-    echo "ログ: cat /tmp/screenshot-to-photos.log"
+    echo "※ ScreenshotClipboardCopy.app がDockに表示されます"
+    echo "※ ログイン時に自動起動します"
 }
 
 unsetup() {
     echo "=== セットアップ解除 ==="
 
-    # Folder Action を解除
+    osascript -e 'tell application "ScreenshotClipboardCopy" to quit' 2>/dev/null
     osascript -e '
-    tell application "System Events"
-        try
-            delete folder action "Screenshot Clipboard Copy"
-        end try
-    end tell
+        tell application "System Events"
+            try
+                delete login item "ScreenshotClipboardCopy"
+            end try
+        end tell
     ' 2>/dev/null
-    rm -f "$FOLDER_ACTION_SCRIPT"
-    echo "  Folder Action を削除しました"
+    rm -rf "$CLIP_APP"
+    echo "  クリップボードコピーアプリを削除しました"
 
     launchctl unload "$LAUNCHD_PLIST" 2>/dev/null
-    rm -f "$LAUNCHD_PLIST"
-    echo "  launchd エージェントを削除しました"
+    rm -f "$LAUNCHD_PLIST" "$IMPORT_SCRIPT" "$CLIP_HELPER"
+    echo "  launchd エージェントとスクリプトを削除しました"
 
-    rm -f "$IMPORT_SCRIPT"
-    rm -f "$CLIP_HELPER"
-    echo "  スクリプトを削除しました"
+    # Folder Action の残りも掃除
+    osascript -e 'tell application "System Events" to try
+        delete folder action "Screenshot Clipboard Copy"
+    end try' 2>/dev/null
+    rm -f "$HOME/Library/Scripts/Folder Action Scripts/Screenshot Clipboard Copy.scpt"
 
     echo ""
     echo "=== 解除完了 ==="
@@ -215,15 +197,16 @@ status() {
     current_location=$(defaults read com.apple.screencapture location 2>/dev/null || echo "(デフォルト: デスクトップ)")
     echo "スクショ保存先: $current_location"
 
-    # Folder Action 状態
-    local fa_status
-    fa_status=$(osascript -e 'tell application "System Events" to get folder actions enabled' 2>/dev/null)
-    echo "Folder Action: $fa_status"
-
-    if launchctl list | grep -q "com.user.screenshot-to-photos"; then
-        echo "launchd監視: 実行中"
+    if pgrep -f "ScreenshotClipboardCopy" > /dev/null 2>&1; then
+        echo "クリップボードコピー: 実行中"
     else
-        echo "launchd監視: 停止中"
+        echo "クリップボードコピー: 停止中"
+    fi
+
+    if launchctl list 2>/dev/null | grep -q "com.user.screenshot-to-photos"; then
+        echo "写真インポート: 実行中"
+    else
+        echo "写真インポート: 停止中"
     fi
 
     if [ -f "$IMPORTED_LOG" ]; then
@@ -235,12 +218,6 @@ status() {
     echo ""
     echo "--- 最新ログ ---"
     tail -5 /tmp/screenshot-to-photos.log 2>/dev/null || echo "(ログなし)"
-    local errors
-    errors=$(cat /tmp/screenshot-to-photos.err 2>/dev/null)
-    if [ -n "$errors" ]; then
-        echo "--- エラー ---"
-        tail -5 /tmp/screenshot-to-photos.err
-    fi
 }
 
 case "${1:-status}" in
