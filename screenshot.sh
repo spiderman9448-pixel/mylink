@@ -43,7 +43,7 @@ setup() {
 SCREENSHOT_DIR="$screenshot_dir"
 LOG_FILE="$IMPORTED_LOG"
 
-for file in "\$SCREENSHOT_DIR"/スクリーンショット*.png "\$SCREENSHOT_DIR"/Screenshot*.png "\$SCREENSHOT_DIR"/スクリーンショット*.jpg "\$SCREENSHOT_DIR"/Screenshot*.jpg; do
+for file in "\$SCREENSHOT_DIR"/*.png "\$SCREENSHOT_DIR"/*.jpg "\$SCREENSHOT_DIR"/*.jpeg; do
     [ -f "\$file" ] || continue
 
     if grep -qxF "\$file" "\$LOG_FILE" 2>/dev/null; then
