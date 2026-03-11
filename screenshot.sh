@@ -92,8 +92,12 @@ on idle
     return 0.5
 end idle
 ASEOF
-    osacompile -s -o "$CLIP_APP" "$tmp_as"
+    osacompile -o "$CLIP_APP" "$tmp_as"
     rm -f "$tmp_as"
+
+    # osacompile -s が無視される場合があるので、Info.plist に直接 stay-open を設定
+    /usr/libexec/PlistBuddy -c "Delete :OSAAppletStayOpen" "$CLIP_APP/Contents/Info.plist" 2>/dev/null
+    /usr/libexec/PlistBuddy -c "Add :OSAAppletStayOpen string YES" "$CLIP_APP/Contents/Info.plist"
 
     open "$CLIP_APP"
     echo "     → $CLIP_APP（起動済み、0.5秒間隔で監視）"
