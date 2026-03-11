@@ -70,13 +70,11 @@ JSEOF
 
     local tmp_as
     tmp_as=$(mktemp /tmp/clip-app.XXXXXX.applescript)
-    cat > "$tmp_as" << ASEOF
+    cat > "$tmp_as" << 'ASEOF'
 property lastModDate : 0
+property screenshotDir : "__SCREENSHOT_DIR__"
 
 on idle
-    set screenshotDir to "$screenshot_dir"
-    set helperPath to "$CLIP_HELPER"
-
     try
         set newestFile to do shell script "ls -t " & quoted form of screenshotDir & "/*.png " & quoted form of screenshotDir & "/*.jpg 2>/dev/null | head -1"
         if newestFile is "" then return 0.5
@@ -85,13 +83,23 @@ on idle
 
         if modDate > lastModDate then
             set lastModDate to modDate
-            do shell script "/usr/bin/osascript -l JavaScript " & quoted form of helperPath & " " & quoted form of newestFile
+            -- AppleScriptのGUIコンテキストで直接クリップボードに設定
+            set imgFile to POSIX file newestFile
+            set the clipboard to (read imgFile as «class PNGf»)
         end if
+    on error
+        try
+            -- PNGf で失敗したら JPEG で再試行
+            set imgFile to POSIX file newestFile
+            set the clipboard to (read imgFile as JPEG picture)
+        end try
     end try
 
     return 0.5
 end idle
 ASEOF
+    # プレースホルダーを置換
+    sed -i '' "s|__SCREENSHOT_DIR__|$screenshot_dir|g" "$tmp_as"
     osacompile -o "$CLIP_APP" "$tmp_as"
     rm -f "$tmp_as"
 
