@@ -46,11 +46,14 @@ setup() {
 
     cat > "$IMPORT_SCRIPT" << 'SCRIPT'
 #!/bin/bash
-# スクショフォルダ内の新しい画像を写真アプリにインポートする
+# スクショフォルダ内の新しい画像をクリップボードにコピー＆写真アプリにインポート
 SCREENSHOT_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Screenshots"
 LOG_FILE="$HOME/.local/share/screenshot-imports.log"
 
-sleep 2
+sleep 3
+
+newest=""
+newest_time=0
 
 for file in "$SCREENSHOT_DIR"/*.png "$SCREENSHOT_DIR"/*.jpg "$SCREENSHOT_DIR"/*.jpeg; do
     [ -f "$file" ] || continue
@@ -59,17 +62,35 @@ for file in "$SCREENSHOT_DIR"/*.png "$SCREENSHOT_DIR"/*.jpg "$SCREENSHOT_DIR"/*.
         continue
     fi
 
+    # 最新ファイルを特定
+    file_time=$(stat -f %m "$file" 2>/dev/null || echo 0)
+    if [ "$file_time" -gt "$newest_time" ]; then
+        newest="$file"
+        newest_time="$file_time"
+    fi
+
+    # 写真アプリにインポート
     osascript -e "
         tell application \"Photos\"
+            activate
+            delay 1
             import POSIX file \"$file\"
         end tell
-    " 2>/dev/null
+    " 2>&1
 
     if [ $? -eq 0 ]; then
         echo "$file" >> "$LOG_FILE"
-        logger -t screenshot-to-photos "Imported: $file"
+        echo "$(date): Imported $file"
+    else
+        echo "$(date): FAILED to import $file"
     fi
 done
+
+# 最新のスクショをクリップボードにコピー
+if [ -n "$newest" ]; then
+    osascript -e "set the clipboard to (read (POSIX file \"$newest\") as «class PNGf»)" 2>&1
+    echo "$(date): Copied to clipboard: $newest"
+fi
 SCRIPT
     chmod +x "$IMPORT_SCRIPT"
     echo "     → $IMPORT_SCRIPT"
