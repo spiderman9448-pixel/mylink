@@ -7,8 +7,8 @@
 #
 # 仕組み:
 #   1. macOSのスクショ保存先をiCloud Drive内に変更
-#   2. そのフォルダにフォルダアクションを設定
-#   3. 新しい画像が保存されるたびに写真アプリに自動インポート
+#   2. launchd (WatchPaths) でフォルダを監視
+#   3. 新しい画像が保存されると写真アプリに自動インポート
 #
 # セットアップ:
 #   chmod +x screenshot.sh
@@ -19,70 +19,97 @@
 # =============================================================
 
 ICLOUD_SCREENSHOTS="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Screenshots"
-FOLDER_ACTION_SCRIPT="$HOME/Library/Scripts/Folder Action Scripts/ImportToPhotos.scpt"
+IMPORT_SCRIPT="$HOME/.local/bin/import-screenshot-to-photos.sh"
+LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.user.screenshot-to-photos.plist"
+IMPORTED_LOG="$HOME/.local/share/screenshot-imports.log"
 
 setup() {
     echo "=== スクリーンショット → iPhone 写真 自動同期セットアップ ==="
     echo ""
 
     # 1. iCloud Drive内にスクショフォルダを作成
-    echo "1/3 iCloud Drive内にスクショフォルダを作成..."
+    echo "1/4 iCloud Drive内にスクショフォルダを作成..."
     mkdir -p "$ICLOUD_SCREENSHOTS"
     echo "     → $ICLOUD_SCREENSHOTS"
 
     # 2. macOSのスクショ保存先を変更
-    echo "2/3 macOSのスクショ保存先を変更..."
+    echo "2/4 macOSのスクショ保存先を変更..."
     defaults write com.apple.screencapture location "$ICLOUD_SCREENSHOTS"
     killall SystemUIServer 2>/dev/null
     echo "     → スクショ保存先をiCloud Driveに変更しました"
 
-    # 3. フォルダアクション用AppleScriptを作成＆設定
-    echo "3/3 フォルダアクション（写真アプリ自動インポート）を設定..."
-    mkdir -p "$(dirname "$FOLDER_ACTION_SCRIPT")"
+    # 3. インポートスクリプトを作成
+    echo "3/4 インポートスクリプトを作成..."
+    mkdir -p "$(dirname "$IMPORT_SCRIPT")"
+    mkdir -p "$(dirname "$IMPORTED_LOG")"
+    touch "$IMPORTED_LOG"
 
-    # AppleScriptをコンパイルして保存
-    osacompile -o "$FOLDER_ACTION_SCRIPT" <<'APPLESCRIPT'
-on adding folder items to theFolder after receiving theFiles
-    tell application "Photos"
-        activate
-        delay 1
-        repeat with aFile in theFiles
-            set fileName to name of (info for aFile)
-            if fileName ends with ".png" or fileName ends with ".jpg" or fileName ends with ".jpeg" then
-                try
-                    import {aFile}
-                end try
-            end if
-        end repeat
-    end tell
-end adding folder items to
-APPLESCRIPT
+    cat > "$IMPORT_SCRIPT" << 'SCRIPT'
+#!/bin/bash
+# スクショフォルダ内の新しい画像を写真アプリにインポートする
+SCREENSHOT_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Screenshots"
+LOG_FILE="$HOME/.local/share/screenshot-imports.log"
 
-    if [ $? -ne 0 ]; then
-        echo "     ⚠ AppleScriptのコンパイルに失敗しました"
-        return 1
+sleep 2
+
+for file in "$SCREENSHOT_DIR"/*.png "$SCREENSHOT_DIR"/*.jpg "$SCREENSHOT_DIR"/*.jpeg; do
+    [ -f "$file" ] || continue
+
+    if grep -qxF "$file" "$LOG_FILE" 2>/dev/null; then
+        continue
     fi
 
-    # フォルダアクションをフォルダに紐付け
-    osascript <<ATTACH
-        tell application "System Events"
-            set folder actions enabled to true
-            try
-                set fa to make new folder action with properties {name:"Screenshots Auto Import", path:"$ICLOUD_SCREENSHOTS"}
-            on error
-                set fa to folder action "Screenshots Auto Import"
-            end try
-            try
-                make new script of fa with properties {name:"ImportToPhotos.scpt", POSIX path:"$FOLDER_ACTION_SCRIPT"}
-            end try
+    osascript -e "
+        tell application \"Photos\"
+            import POSIX file \"$file\"
         end tell
-ATTACH
+    " 2>/dev/null
 
     if [ $? -eq 0 ]; then
-        echo "     → フォルダアクションを設定しました"
+        echo "$file" >> "$LOG_FILE"
+        logger -t screenshot-to-photos "Imported: $file"
+    fi
+done
+SCRIPT
+    chmod +x "$IMPORT_SCRIPT"
+    echo "     → $IMPORT_SCRIPT"
+
+    # 4. launchd エージェントを作成・登録
+    echo "4/4 launchd エージェント（フォルダ監視）を登録..."
+
+    # 既存のエージェントがあればアンロード
+    launchctl unload "$LAUNCHD_PLIST" 2>/dev/null
+
+    cat > "$LAUNCHD_PLIST" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.screenshot-to-photos</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$IMPORT_SCRIPT</string>
+    </array>
+    <key>WatchPaths</key>
+    <array>
+        <string>$ICLOUD_SCREENSHOTS</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/tmp/screenshot-to-photos.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/screenshot-to-photos.err</string>
+</dict>
+</plist>
+PLIST
+
+    launchctl load "$LAUNCHD_PLIST"
+    if [ $? -eq 0 ]; then
+        echo "     → launchd エージェントを登録しました"
     else
-        echo "     ⚠ フォルダアクションの設定に失敗しました"
-        echo "     → 手動設定: Finderで右クリック → サービス → フォルダアクション設定"
+        echo "     ⚠ launchd の登録に失敗しました"
         return 1
     fi
 
@@ -90,34 +117,32 @@ ATTACH
     echo "=== セットアップ完了 ==="
     echo "これで普段通り ⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
     echo "  1. iCloud Drive/Screenshots に保存"
-    echo "  2. 写真アプリに自動インポート"
-    echo "  3. iCloud Photos経由でiPhoneに同期"
+    echo "  2. launchd がフォルダ変更を検知"
+    echo "  3. 写真アプリに自動インポート → iPhoneに同期"
     echo ""
     echo "※ iCloud写真がオンになっていることを確認してください"
     echo "  (設定 → Apple ID → iCloud → 写真)"
+    echo ""
+    echo "テスト: スクショを撮って数秒待ち、写真アプリを確認してください"
+    echo "ログ: cat /tmp/screenshot-to-photos.log"
 }
 
 unsetup() {
     echo "=== セットアップ解除 ==="
+
+    # launchd エージェントをアンロード・削除
+    launchctl unload "$LAUNCHD_PLIST" 2>/dev/null
+    rm -f "$LAUNCHD_PLIST"
+    echo "✔ launchd エージェントを削除しました"
 
     # スクショ保存先をデフォルト(デスクトップ)に戻す
     defaults write com.apple.screencapture location "$HOME/Desktop"
     killall SystemUIServer 2>/dev/null
     echo "✔ スクショ保存先をデスクトップに戻しました"
 
-    # フォルダアクションを削除
-    osascript <<'DETACH'
-        tell application "System Events"
-            try
-                delete folder action "Screenshots Auto Import"
-            end try
-        end tell
-DETACH
-    echo "✔ フォルダアクションを削除しました"
-
-    # スクリプトファイルを削除
-    rm -f "$FOLDER_ACTION_SCRIPT"
-    echo "✔ AppleScriptを削除しました"
+    # インポートスクリプトを削除
+    rm -f "$IMPORT_SCRIPT"
+    echo "✔ インポートスクリプトを削除しました"
 
     echo ""
     echo "=== 解除完了 ==="
@@ -125,14 +150,31 @@ DETACH
 
 status() {
     echo "=== 現在の設定状況 ==="
+
     local current_location
     current_location=$(defaults read com.apple.screencapture location 2>/dev/null || echo "(デフォルト: デスクトップ)")
     echo "スクショ保存先: $current_location"
 
-    if [ -f "$FOLDER_ACTION_SCRIPT" ]; then
-        echo "フォルダアクション: ✔ 設定済み"
+    if launchctl list | grep -q "com.user.screenshot-to-photos"; then
+        echo "launchd監視: ✔ 実行中"
     else
-        echo "フォルダアクション: ✗ 未設定"
+        echo "launchd監視: ✗ 停止中"
+    fi
+
+    if [ -f "$IMPORTED_LOG" ]; then
+        local count
+        count=$(wc -l < "$IMPORTED_LOG" | tr -d ' ')
+        echo "インポート済み: ${count}枚"
+    fi
+
+    if [ -f /tmp/screenshot-to-photos.err ]; then
+        local errors
+        errors=$(cat /tmp/screenshot-to-photos.err)
+        if [ -n "$errors" ]; then
+            echo ""
+            echo "--- エラーログ ---"
+            tail -5 /tmp/screenshot-to-photos.err
+        fi
     fi
 }
 
