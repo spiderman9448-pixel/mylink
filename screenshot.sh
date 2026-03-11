@@ -12,10 +12,15 @@
 # オプション:
 #   SAVE_DIR 環境変数でスクショの保存先を変更可能
 #     例: SAVE_DIR=~/Pictures ./screenshot.sh
+#
+# iCloud連携:
+#   デフォルトでiCloud Drive内に保存 + 写真アプリにインポートされます
+#   iCloud Photosが有効なら、iPhoneの写真にも自動同期されます
 # =============================================================
 
-# 保存先ディレクトリ（デフォルト: ~/Desktop/screenshots）
-SAVE_DIR="${SAVE_DIR:-$HOME/Desktop/screenshots}"
+# 保存先ディレクトリ（デフォルト: iCloud Driveのスクリーンショットフォルダ）
+ICLOUD_SCREENSHOTS="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Screenshots"
+SAVE_DIR="${SAVE_DIR:-$ICLOUD_SCREENSHOTS}"
 mkdir -p "$SAVE_DIR"
 
 # タイムスタンプ付きファイル名を生成
@@ -54,6 +59,14 @@ take_screenshot() {
 
     # クリップボードにコピー
     osascript -e "set the clipboard to (read (POSIX file \"$filepath\") as «class PNGf»)"
+
+    # 写真アプリにインポート（iCloud Photos経由でiPhoneにも同期される）
+    osascript -e "
+        tell application \"Photos\"
+            import POSIX file \"$filepath\"
+        end tell
+    " 2>/dev/null && echo "✔ 写真アプリにインポートしました（iPhoneに同期されます）" \
+                  || echo "⚠ 写真アプリへのインポートに失敗しました（iCloud Driveには保存済み）"
 
     echo "✔ 保存: $filepath"
     echo "✔ クリップボードにコピーしました"
