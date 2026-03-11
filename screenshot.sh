@@ -114,10 +114,8 @@ SCRIPT
         <string>/bin/bash</string>
         <string>$IMPORT_SCRIPT</string>
     </array>
-    <key>WatchPaths</key>
-    <array>
-        <string>$ICLOUD_SCREENSHOTS</string>
-    </array>
+    <key>StartInterval</key>
+    <integer>5</integer>
     <key>StandardOutPath</key>
     <string>/tmp/screenshot-to-photos.log</string>
     <key>StandardErrorPath</key>
@@ -138,8 +136,8 @@ PLIST
     echo "=== セットアップ完了 ==="
     echo "これで普段通り ⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
     echo "  1. iCloud Drive/Screenshots に保存"
-    echo "  2. launchd がフォルダ変更を検知"
-    echo "  3. 写真アプリに自動インポート → iPhoneに同期"
+    echo "  2. 5秒ごとに新しいスクショを自動検知"
+    echo "  3. クリップボードにコピー＋写真アプリにインポート → iPhoneに同期"
     echo ""
     echo "※ iCloud写真がオンになっていることを確認してください"
     echo "  (設定 → Apple ID → iCloud → 写真)"
