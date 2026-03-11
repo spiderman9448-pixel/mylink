@@ -53,7 +53,11 @@ for file in "\$SCREENSHOT_DIR"/スクリーンショット*.png "\$SCREENSHOT_DI
     echo "\$(date): Found new screenshot: \$file"
 
     # クリップボードにコピー（⌘V で貼り付け可能に）
-    osascript -e "set the clipboard to (read (POSIX file \"\$file\") as «class PNGf»)" 2>&1
+    CLIP_TYPE="PNGf"
+    case "\$file" in
+        *.jpg|*.jpeg|*.JPG|*.JPEG) CLIP_TYPE="JPEG" ;;
+    esac
+    printf 'set the clipboard to (read (POSIX file "%s") as \xC2\xABclass %s\xC2\xBB)\n' "\$file" "\$CLIP_TYPE" | osascript 2>&1
     if [ \$? -eq 0 ]; then
         echo "\$(date): Copied to clipboard: \$file"
     else
