@@ -141,7 +141,7 @@ SCRIPT
         <string>$IMPORT_SCRIPT</string>
     </array>
     <key>StartInterval</key>
-    <integer>5</integer>
+    <integer>3</integer>
     <key>StandardOutPath</key>
     <string>/tmp/screenshot-to-photos.log</string>
     <key>StandardErrorPath</key>
@@ -156,7 +156,7 @@ PLIST
     echo "⌘⇧3 / ⌘⇧4 / ⌘⇧5 でスクショを撮ると:"
     echo "  1. $screenshot_dir に保存"
     echo "  2. 1秒以内にクリップボードに自動コピー（⌘V で貼り付け可能）"
-    echo "  3. 5秒以内に写真アプリにインポート → iPhoneに同期"
+    echo "  3. 3秒以内に写真アプリにインポート → iPhoneに同期"
     echo ""
     echo "※ ScreenshotClipboardCopy.app がDockに表示されます"
     echo "※ ログイン時に自動起動します"
