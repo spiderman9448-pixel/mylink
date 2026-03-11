@@ -58,9 +58,8 @@ while true; do
 
     if [ -n "\$newest" ] && [ "\$newest" != "\$LAST_FILE" ]; then
         LAST_FILE="\$newest"
-        # AppleScript の set the clipboard to でGUIクリップボードに直接設定
-        osascript -e "set the clipboard to (read (POSIX file \"\$newest\") as «class PNGf»)" 2>/dev/null \
-            || osascript -e "set the clipboard to (read (POSIX file \"\$newest\") as JPEG picture)" 2>/dev/null
+        # JXA + NSPasteboard でクリップボードにコピー（特殊文字不要）
+        /usr/bin/osascript -l JavaScript -e "ObjC.import('AppKit'); var img = \\\$.NSImage.alloc.initWithContentsOfFile('\$newest'); if (!img.isNil()) { var pb = \\\$.NSPasteboard.generalPasteboard; pb.clearContents; pb.writeObjects(\\\$.NSArray.arrayWithObject(img)); }" 2>> /tmp/screenshot-clipboard.err
     fi
 
     sleep 0.5
