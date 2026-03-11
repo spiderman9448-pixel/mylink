@@ -61,12 +61,21 @@ take_screenshot() {
     osascript -e "set the clipboard to (read (POSIX file \"$filepath\") as «class PNGf»)"
 
     # 写真アプリにインポート（iCloud Photos経由でiPhoneにも同期される）
-    osascript -e "
-        tell application \"Photos\"
-            import POSIX file \"$filepath\"
+    local import_result
+    import_result=$(osascript <<APPLESCRIPT 2>&1
+        tell application "Photos"
+            activate
+            delay 2
+            set theFile to POSIX file "$filepath"
+            import {theFile}
         end tell
-    " 2>/dev/null && echo "✔ 写真アプリにインポートしました（iPhoneに同期されます）" \
-                  || echo "⚠ 写真アプリへのインポートに失敗しました（iCloud Driveには保存済み）"
+APPLESCRIPT
+    )
+    if [ $? -eq 0 ]; then
+        echo "✔ 写真アプリにインポートしました（iPhoneに同期されます）"
+    else
+        echo "⚠ 写真アプリへのインポートに失敗: $import_result"
+    fi
 
     echo "✔ 保存: $filepath"
     echo "✔ クリップボードにコピーしました"
