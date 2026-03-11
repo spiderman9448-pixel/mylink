@@ -14,6 +14,7 @@
 # =============================================================
 
 IMPORT_SCRIPT="$HOME/.local/bin/import-screenshot-to-photos.sh"
+CLIP_HELPER="$HOME/.local/bin/copy-image-to-clipboard.js"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.user.screenshot-to-photos.plist"
 IMPORTED_LOG="$HOME/.local/share/screenshot-imports.log"
 
@@ -31,8 +32,28 @@ setup() {
     echo "     → $screenshot_dir"
     mkdir -p "$screenshot_dir"
 
-    # 2. インポートスクリプトを作成
-    echo "2/3 インポートスクリプトを作成..."
+    # 2. クリップボードヘルパー（JXA）を作成
+    echo "2/4 クリップボードヘルパーを作成..."
+    mkdir -p "$(dirname "$CLIP_HELPER")"
+    cat > "$CLIP_HELPER" << 'JSEOF'
+ObjC.import('AppKit');
+ObjC.import('Foundation');
+function run(argv) {
+    var path = argv[0];
+    var image = $.NSImage.alloc.initWithContentsOfFile(path);
+    if (image.isNil()) {
+        return "FAIL: could not load image";
+    }
+    var pb = $.NSPasteboard.generalPasteboard;
+    pb.clearContents;
+    pb.writeObjects($.NSArray.arrayWithObject(image));
+    return "OK";
+}
+JSEOF
+    echo "     → $CLIP_HELPER"
+
+    # 3. インポートスクリプトを作成
+    echo "3/4 インポートスクリプトを作成..."
     mkdir -p "$(dirname "$IMPORT_SCRIPT")"
     mkdir -p "$(dirname "$IMPORTED_LOG")"
     touch "$IMPORTED_LOG"
@@ -52,16 +73,12 @@ for file in "\$SCREENSHOT_DIR"/*.png "\$SCREENSHOT_DIR"/*.jpg "\$SCREENSHOT_DIR"
 
     echo "\$(date): Found new screenshot: \$file"
 
-    # クリップボードにコピー（⌘V で貼り付け可能に）
-    CLIP_TYPE="PNGf"
-    case "\$file" in
-        *.jpg|*.jpeg|*.JPG|*.JPEG) CLIP_TYPE="JPEG" ;;
-    esac
-    printf 'set the clipboard to (read (POSIX file "%s") as \xC2\xABclass %s\xC2\xBB)\n' "\$file" "\$CLIP_TYPE" | osascript 2>&1
-    if [ \$? -eq 0 ]; then
+    # クリップボードにコピー（JXA + NSPasteboard で確実にコピー）
+    CLIP_RESULT=\$(osascript -l JavaScript "$CLIP_HELPER" "\$file" 2>&1)
+    if [ "\$CLIP_RESULT" = "OK" ]; then
         echo "\$(date): Copied to clipboard: \$file"
     else
-        echo "\$(date): Clipboard copy failed: \$file"
+        echo "\$(date): Clipboard copy failed (\$CLIP_RESULT): \$file"
     fi
 
     # 写真アプリにインポート
@@ -83,7 +100,7 @@ SCRIPT
     echo "     → $IMPORT_SCRIPT"
 
     # 3. launchd エージェントを作成・登録
-    echo "3/3 launchd エージェント（5秒ポーリング）を登録..."
+    echo "4/4 launchd エージェント（5秒ポーリング）を登録..."
 
     # 既存のエージェントがあればアンロード
     launchctl unload "$LAUNCHD_PLIST" 2>/dev/null
@@ -141,6 +158,7 @@ unsetup() {
     echo "  launchd エージェントを削除しました"
 
     rm -f "$IMPORT_SCRIPT"
+    rm -f "$CLIP_HELPER"
     echo "  インポートスクリプトを削除しました"
 
     echo ""
